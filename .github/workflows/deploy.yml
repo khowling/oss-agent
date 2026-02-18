@@ -74,6 +74,11 @@ jobs:
 
       - name: Deploy agent to ACA
         run: |
+          az containerapp registry set \
+            --name ca-agent-${{ env.ENVIRONMENT_NAME }} \
+            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+            --server ${{ steps.acr.outputs.loginServer }} \
+            --identity system
           az containerapp update \
             --name ca-agent-${{ env.ENVIRONMENT_NAME }} \
             --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
@@ -81,10 +86,16 @@ jobs:
 
       - name: Deploy MCP server to ACA
         run: |
+          az containerapp registry set \
+            --name ca-mcp-${{ env.ENVIRONMENT_NAME }} \
+            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+            --server ${{ steps.acr.outputs.loginServer }} \
+            --identity system
           az containerapp update \
             --name ca-mcp-${{ env.ENVIRONMENT_NAME }} \
             --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
-            --image ${{ steps.acr.outputs.loginServer }}/oss-agent-mcp:${{ github.sha }}
+            --image ${{ steps.acr.outputs.loginServer }}/oss-agent-mcp:${{ github.sha }} \
+            --command "python" "/app/mcp-servers/sample_server.py"
 
       - name: Print agent URL
         run: |

@@ -55,10 +55,7 @@ module mcpServer 'modules/container-app.bicep' = {
     location: location
     tags: tags
     environmentId: containerAppEnvironment.outputs.id
-    registryServer: containerRegistry.outputs.loginServer
-    imageName: '${containerRegistry.outputs.loginServer}/oss-agent-mcp:latest'
     targetPort: 8001
-    command: ['python', '/app/mcp-servers/sample_server.py']
     envVars: []
     isExternal: false
   }
@@ -72,8 +69,6 @@ module agent 'modules/container-app.bicep' = {
     location: location
     tags: tags
     environmentId: containerAppEnvironment.outputs.id
-    registryServer: containerRegistry.outputs.loginServer
-    imageName: '${containerRegistry.outputs.loginServer}/oss-agent:latest'
     targetPort: 8080
     command: []
     envVars: [
