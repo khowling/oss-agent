@@ -1,0 +1,3 @@
+agent-framework[all]
+python-dotenv
+mcp[cli]
