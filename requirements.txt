@@ -1,3 +1,5 @@
 agent-framework[all]
 python-dotenv
 mcp[cli]
+PyJWT[crypto]
+httpx

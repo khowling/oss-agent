@@ -1,5 +1,6 @@
 from agent_framework import Agent, MCPStreamableHTTPTool, MCPStdioTool
 from agent_framework.openai import OpenAIChatClient
+import httpx
 
 from config import (
     LLM_API_KEY, LLM_BASE_URL, LLM_MODEL, LLM_PROVIDER,
@@ -11,11 +12,14 @@ You have access to tools via MCP servers. Use them when the user's request requi
 Keep your answers concise and relevant."""
 
 
-def build_tools() -> list:
+def build_tools(http_client: httpx.AsyncClient | None = None) -> list:
     """Build the list of MCP tools based on configuration."""
     tools = []
     if MCP_SERVER_URL:
-        tools.append(MCPStreamableHTTPTool(name="lseg-mcp", url=MCP_SERVER_URL))
+        kwargs = {}
+        if http_client:
+            kwargs["http_client"] = http_client
+        tools.append(MCPStreamableHTTPTool(name="lseg-mcp", url=MCP_SERVER_URL, **kwargs))
     if MCP_SERVER_COMMAND:
         args = MCP_SERVER_ARGS.split() if MCP_SERVER_ARGS else []
         tools.append(MCPStdioTool(name="lseg-mcp-stdio", command=MCP_SERVER_COMMAND, args=args))
@@ -45,10 +49,10 @@ def create_llm_client() -> OpenAIChatClient:
     )
 
 
-def create_agent() -> Agent:
+def create_agent(http_client: httpx.AsyncClient | None = None) -> Agent:
     """Create and return the agent with configured LLM and MCP tools."""
     client = create_llm_client()
-    tools = build_tools()
+    tools = build_tools(http_client=http_client)
 
     return Agent(
         client=client,

@@ -3,15 +3,71 @@
 Exposes simple tools that the agent can call:
 - calculator: basic arithmetic
 - lookup: sample data lookup
+
+Supports optional Entra ID (Azure AD) token validation when
+ENTRA_TENANT_ID and MCP_API_CLIENT_ID env vars are set.
 """
 
+import os
+import time
+import httpx
+import jwt
 from mcp.server.fastmcp import FastMCP
+from mcp.server.auth.provider import TokenVerifier, AccessToken
+
+
+class EntraTokenVerifier(TokenVerifier):
+    """Validates Entra ID JWT access tokens."""
+
+    def __init__(self, tenant_id: str, client_id: str):
+        self.tenant_id = tenant_id
+        self.client_id = client_id
+        self.issuer = f"https://login.microsoftonline.com/{tenant_id}/v2.0"
+        self.jwks_uri = f"https://login.microsoftonline.com/{tenant_id}/discovery/v2.0/keys"
+        self._jwks_client = jwt.PyJWKClient(self.jwks_uri, cache_keys=True)
+
+    async def verify_token(self, token: str) -> AccessToken | None:
+        try:
+            signing_key = self._jwks_client.get_signing_key_from_jwt(token)
+            claims = jwt.decode(
+                token,
+                signing_key.key,
+                algorithms=["RS256"],
+                audience=self.client_id,
+                issuer=self.issuer,
+            )
+            return AccessToken(
+                token=token,
+                client_id=claims.get("azp", ""),
+                scopes=claims.get("scp", "").split(),
+                expires_at=claims.get("exp", int(time.time()) + 3600),
+            )
+        except (jwt.InvalidTokenError, Exception):
+            return None
+
+
+# Auth configuration from environment
+tenant_id = os.environ.get("ENTRA_TENANT_ID")
+mcp_client_id = os.environ.get("MCP_API_CLIENT_ID")
+
+auth_kwargs = {}
+if tenant_id and mcp_client_id:
+    from mcp.server.auth.settings import AuthSettings
+    auth_kwargs["auth"] = AuthSettings(
+        issuer_url=f"https://login.microsoftonline.com/{tenant_id}/v2.0",
+        resource_server_url="https://mcp.example.com",
+    )
+    auth_kwargs["token_verifier"] = EntraTokenVerifier(tenant_id, mcp_client_id)
+    print(f"MCP auth enabled: tenant={tenant_id}, audience={mcp_client_id}")
+else:
+    print("MCP auth disabled: set ENTRA_TENANT_ID and MCP_API_CLIENT_ID to enable")
 
 mcp = FastMCP(
     "LSEG Sample Server",
     "A sample MCP server for testing agent tool calls.",
     host="0.0.0.0",
     port=8001,
+    **auth_kwargs,
 )
 
 
