@@ -70,7 +70,6 @@ module agent 'modules/container-app.bicep' = {
     tags: tags
     environmentId: containerAppEnvironment.outputs.id
     targetPort: 8080
-    command: []
     envVars: [
       {
         name: 'LLM_PROVIDER'
