@@ -136,10 +136,20 @@ jobs:
             --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
             --server ${{ env.ACR_NAME }}.azurecr.io \
             --identity system
+          # Wait for registry set to complete provisioning
+          while [ "$(az containerapp show --name ca-agent-${{ env.ENVIRONMENT_NAME }} --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --query properties.provisioningState -o tsv)" = "InProgress" ]; do
+            echo "Waiting for provisioning to complete..."
+            sleep 10
+          done
           az containerapp ingress update \
             --name ca-agent-${{ env.ENVIRONMENT_NAME }} \
             --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
             --target-port 8080
+          # Wait again
+          while [ "$(az containerapp show --name ca-agent-${{ env.ENVIRONMENT_NAME }} --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --query properties.provisioningState -o tsv)" = "InProgress" ]; do
+            echo "Waiting for provisioning to complete..."
+            sleep 10
+          done
           az containerapp update \
             --name ca-agent-${{ env.ENVIRONMENT_NAME }} \
             --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
@@ -152,10 +162,18 @@ jobs:
             --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
             --server ${{ env.ACR_NAME }}.azurecr.io \
             --identity system
+          while [ "$(az containerapp show --name ca-mcp-${{ env.ENVIRONMENT_NAME }} --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --query properties.provisioningState -o tsv)" = "InProgress" ]; do
+            echo "Waiting for provisioning to complete..."
+            sleep 10
+          done
           az containerapp ingress update \
             --name ca-mcp-${{ env.ENVIRONMENT_NAME }} \
             --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
             --target-port 8001
+          while [ "$(az containerapp show --name ca-mcp-${{ env.ENVIRONMENT_NAME }} --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --query properties.provisioningState -o tsv)" = "InProgress" ]; do
+            echo "Waiting for provisioning to complete..."
+            sleep 10
+          done
           az containerapp update \
             --name ca-mcp-${{ env.ENVIRONMENT_NAME }} \
             --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
