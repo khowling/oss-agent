@@ -1,24 +1,28 @@
 from agent_framework import Agent, MCPStreamableHTTPTool, MCPStdioTool
 from agent_framework.openai import OpenAIChatClient
-import httpx
 
 from config import (
     LLM_API_KEY, LLM_BASE_URL, LLM_MODEL, LLM_PROVIDER,
     MCP_SERVER_URL, MCP_SERVER_COMMAND, MCP_SERVER_ARGS,
 )
+from auth import create_token_forwarding_httpx_client, is_auth_enabled
 
 AGENT_INSTRUCTIONS = """You are a helpful assistant.
 You have access to tools via MCP servers. Use them when the user's request requires it.
 Keep your answers concise and relevant."""
 
 
-def build_tools(http_client: httpx.AsyncClient | None = None) -> list:
-    """Build the list of MCP tools based on configuration."""
+def build_tools() -> list:
+    """Build the list of MCP tools based on configuration.
+
+    When Entra ID auth is enabled, uses an httpx client with a request event hook
+    that dynamically reads the user's Bearer token from contextvars per-request.
+    """
     tools = []
     if MCP_SERVER_URL:
         kwargs = {}
-        if http_client:
-            kwargs["http_client"] = http_client
+        if is_auth_enabled():
+            kwargs["http_client"] = create_token_forwarding_httpx_client()
         tools.append(MCPStreamableHTTPTool(name="lseg-mcp", url=MCP_SERVER_URL, **kwargs))
     if MCP_SERVER_COMMAND:
         args = MCP_SERVER_ARGS.split() if MCP_SERVER_ARGS else []
@@ -49,10 +53,10 @@ def create_llm_client() -> OpenAIChatClient:
     )
 
 
-def create_agent(http_client: httpx.AsyncClient | None = None) -> Agent:
+def create_agent() -> Agent:
     """Create and return the agent with configured LLM and MCP tools."""
     client = create_llm_client()
-    tools = build_tools(http_client=http_client)
+    tools = build_tools()
 
     return Agent(
         client=client,

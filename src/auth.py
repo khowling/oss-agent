@@ -1,20 +1,19 @@
 """OAuth2 authentication helpers for MCP server access.
 
 Provides:
-- MSAL-based token acquisition for Entra ID
-- Auth endpoints for the agent server (login redirect, callback, token)
-- httpx client factory with Bearer token injection
+- Entra ID auth config for frontend MSAL.js flow
+- Per-request token context via contextvars
+- httpx client factory with dynamic Bearer token injection
 """
 
+import contextvars
 import httpx
-from starlette.applications import Starlette
-from starlette.requests import Request
-from starlette.responses import JSONResponse, RedirectResponse
 from config import ENTRA_TENANT_ID, AGENT_CLIENT_ID, MCP_API_CLIENT_ID
 
-
-# In-memory token store keyed by session
-_token_store: dict[str, str] = {}
+# Per-request token context — set by middleware, read by httpx event hook
+_request_token: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "_request_token", default=None
+)
 
 AUTHORITY = f"https://login.microsoftonline.com/{ENTRA_TENANT_ID}"
 SCOPE = f"api://{MCP_API_CLIENT_ID}/MCP.Access"
@@ -35,17 +34,28 @@ def get_auth_config() -> dict:
     }
 
 
-def store_token(session_id: str, token: str) -> None:
-    _token_store[session_id] = token
+def set_request_token(token: str | None) -> None:
+    _request_token.set(token)
 
 
-def get_token(session_id: str) -> str | None:
-    return _token_store.get(session_id)
+def get_request_token() -> str | None:
+    return _request_token.get()
 
 
-def create_authenticated_httpx_client(token: str) -> httpx.AsyncClient:
-    """Create an httpx client that attaches Bearer token to all requests."""
+def _inject_bearer_token(request: httpx.Request) -> None:
+    """httpx event hook that injects the current user's token from contextvars."""
+    token = _request_token.get()
+    if token:
+        request.headers["Authorization"] = f"Bearer {token}"
+
+
+def create_token_forwarding_httpx_client() -> httpx.AsyncClient:
+    """Create an httpx client that dynamically injects the per-request Bearer token.
+
+    The token is read from contextvars at each request time, so a single client
+    instance works across all users/requests.
+    """
     return httpx.AsyncClient(
-        headers={"Authorization": f"Bearer {token}"},
+        event_hooks={"request": [_inject_bearer_token]},
         timeout=30.0,
     )
