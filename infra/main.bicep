@@ -15,6 +15,15 @@ param openAIModelVersion string = '2024-07-18'
 @description('Azure OpenAI deployment SKU capacity (tokens per minute in thousands)')
 param openAICapacity int = 10
 
+@description('Entra ID tenant ID for MCP auth')
+param entraTenantId string = ''
+
+@description('MCP Server API app client ID')
+param mcpApiClientId string = ''
+
+@description('Agent client app ID')
+param agentClientId string = ''
+
 var resourceGroupName = 'rg-${environmentName}'
 var tags = {
   environment: environmentName
@@ -58,7 +67,16 @@ module mcpServer 'modules/container-app.bicep' = {
     registryServer: containerRegistry.outputs.loginServer
     targetPort: 8001
     command: ['python', '/app/mcp-servers/sample_server.py']
-    envVars: []
+    envVars: [
+      {
+        name: 'ENTRA_TENANT_ID'
+        value: entraTenantId
+      }
+      {
+        name: 'MCP_API_CLIENT_ID'
+        value: mcpApiClientId
+      }
+    ]
     isExternal: false
   }
 }
@@ -93,6 +111,22 @@ module agent 'modules/container-app.bicep' = {
       {
         name: 'MCP_SERVER_URL'
         value: 'https://${mcpServer.outputs.fqdn}/mcp'
+      }
+      {
+        name: 'ENTRA_TENANT_ID'
+        value: entraTenantId
+      }
+      {
+        name: 'AGENT_CLIENT_ID'
+        value: agentClientId
+      }
+      {
+        name: 'MCP_API_CLIENT_ID'
+        value: mcpApiClientId
+      }
+      {
+        name: 'MCP_API_SCOPE'
+        value: mcpApiClientId != '' ? 'api://${mcpApiClientId}/MCP.Access' : ''
       }
     ]
     secrets: [
