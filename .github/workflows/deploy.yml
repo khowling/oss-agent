@@ -92,6 +92,16 @@ jobs:
       - name: Login to ACR
         run: az acr login --name ${{ env.ACR_NAME }}
 
+      - name: Ensure AcrPull role for container apps
+        run: |
+          ACR_ID=$(az acr show --name ${{ env.ACR_NAME }} --query id -o tsv)
+          for APP_NAME in ca-agent-${{ env.ENVIRONMENT_NAME }} ca-mcp-${{ env.ENVIRONMENT_NAME }}; do
+            PRINCIPAL_ID=$(az containerapp show --name $APP_NAME --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --query identity.principalId -o tsv 2>/dev/null || true)
+            if [ -n "$PRINCIPAL_ID" ]; then
+              az role assignment create --assignee "$PRINCIPAL_ID" --role AcrPull --scope "$ACR_ID" 2>/dev/null || true
+            fi
+          done
+
       - name: Set image tag
         id: tag
         run: |
