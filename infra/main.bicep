@@ -56,7 +56,6 @@ module mcpServer 'modules/container-app.bicep' = {
     tags: tags
     environmentId: containerAppEnvironment.outputs.id
     registryServer: containerRegistry.outputs.loginServer
-    registryIdentity: containerRegistry.outputs.identityId
     imageName: '${containerRegistry.outputs.loginServer}/oss-agent-mcp:latest'
     targetPort: 8001
     command: ['python', '/app/mcp-servers/sample_server.py']
@@ -74,11 +73,14 @@ module agent 'modules/container-app.bicep' = {
     tags: tags
     environmentId: containerAppEnvironment.outputs.id
     registryServer: containerRegistry.outputs.loginServer
-    registryIdentity: containerRegistry.outputs.identityId
     imageName: '${containerRegistry.outputs.loginServer}/oss-agent:latest'
     targetPort: 8080
     command: []
     envVars: [
+      {
+        name: 'LLM_PROVIDER'
+        value: 'azure'
+      }
       {
         name: 'LLM_API_KEY'
         secretRef: 'llm-api-key'

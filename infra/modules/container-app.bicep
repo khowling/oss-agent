@@ -13,9 +13,6 @@ param environmentId string
 @description('Container registry server')
 param registryServer string
 
-@description('Container registry managed identity ID')
-param registryIdentity string
-
 @description('Container image name')
 param imageName string
 

@@ -34,7 +34,7 @@ resource deployment 'Microsoft.CognitiveServices/accounts/deployments@2024-10-01
   parent: openAI
   name: modelName
   sku: {
-    name: 'Standard'
+    name: 'GlobalStandard'
     capacity: capacity
   }
   properties: {
@@ -46,6 +46,8 @@ resource deployment 'Microsoft.CognitiveServices/accounts/deployments@2024-10-01
   }
 }
 
-output endpoint string = '${openAI.properties.endpoint}openai/deployments/${modelName}'
+output endpoint string = openAI.properties.endpoint
+@description('The API key for the Azure OpenAI resource')
+#disable-next-line outputs-should-not-contain-secrets
 output apiKey string = openAI.listKeys().key1
 output name string = openAI.name

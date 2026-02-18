@@ -6,9 +6,8 @@ on:
   workflow_dispatch:
 
 env:
-  AZURE_RESOURCE_GROUP: rg-oss-agent-dev
-  ACR_NAME: crossagentdev
   ENVIRONMENT_NAME: oss-agent-dev
+  AZURE_RESOURCE_GROUP: rg-oss-agent-dev
 
 permissions:
   id-token: write
@@ -38,36 +37,54 @@ jobs:
           template: infra/main.bicep
           parameters: infra/main.bicepparam
 
+      - name: Get ACR name
+        id: acr
+        run: |
+          ACR_LOGIN_SERVER="${{ steps.infra.outputs.acrLoginServer }}"
+          ACR_NAME="${ACR_LOGIN_SERVER%%.*}"
+          echo "name=$ACR_NAME" >> "$GITHUB_OUTPUT"
+          echo "loginServer=$ACR_LOGIN_SERVER" >> "$GITHUB_OUTPUT"
+
       - name: Login to ACR
-        run: az acr login --name ${{ env.ACR_NAME }}
+        run: az acr login --name ${{ steps.acr.outputs.name }}
+
+      - name: Grant AcrPull to container apps
+        run: |
+          ACR_ID=$(az acr show --name ${{ steps.acr.outputs.name }} --query id -o tsv)
+          for APP_NAME in ca-agent-${{ env.ENVIRONMENT_NAME }} ca-mcp-${{ env.ENVIRONMENT_NAME }}; do
+            PRINCIPAL_ID=$(az containerapp show --name $APP_NAME --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --query identity.principalId -o tsv 2>/dev/null || true)
+            if [ -n "$PRINCIPAL_ID" ]; then
+              az role assignment create --assignee "$PRINCIPAL_ID" --role AcrPull --scope "$ACR_ID" 2>/dev/null || true
+            fi
+          done
 
       - name: Build and push agent image
         run: |
-          docker build -t ${{ env.ACR_NAME }}.azurecr.io/oss-agent:${{ github.sha }} \
-                       -t ${{ env.ACR_NAME }}.azurecr.io/oss-agent:latest .
-          docker push ${{ env.ACR_NAME }}.azurecr.io/oss-agent:${{ github.sha }}
-          docker push ${{ env.ACR_NAME }}.azurecr.io/oss-agent:latest
+          docker build -t ${{ steps.acr.outputs.loginServer }}/oss-agent:${{ github.sha }} \
+                       -t ${{ steps.acr.outputs.loginServer }}/oss-agent:latest .
+          docker push ${{ steps.acr.outputs.loginServer }}/oss-agent:${{ github.sha }}
+          docker push ${{ steps.acr.outputs.loginServer }}/oss-agent:latest
 
       - name: Build and push MCP server image
         run: |
-          docker build -t ${{ env.ACR_NAME }}.azurecr.io/oss-agent-mcp:${{ github.sha }} \
-                       -t ${{ env.ACR_NAME }}.azurecr.io/oss-agent-mcp:latest .
-          docker push ${{ env.ACR_NAME }}.azurecr.io/oss-agent-mcp:${{ github.sha }}
-          docker push ${{ env.ACR_NAME }}.azurecr.io/oss-agent-mcp:latest
+          docker build -t ${{ steps.acr.outputs.loginServer }}/oss-agent-mcp:${{ github.sha }} \
+                       -t ${{ steps.acr.outputs.loginServer }}/oss-agent-mcp:latest .
+          docker push ${{ steps.acr.outputs.loginServer }}/oss-agent-mcp:${{ github.sha }}
+          docker push ${{ steps.acr.outputs.loginServer }}/oss-agent-mcp:latest
 
       - name: Deploy agent to ACA
         run: |
           az containerapp update \
             --name ca-agent-${{ env.ENVIRONMENT_NAME }} \
             --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
-            --image ${{ env.ACR_NAME }}.azurecr.io/oss-agent:${{ github.sha }}
+            --image ${{ steps.acr.outputs.loginServer }}/oss-agent:${{ github.sha }}
 
       - name: Deploy MCP server to ACA
         run: |
           az containerapp update \
             --name ca-mcp-${{ env.ENVIRONMENT_NAME }} \
             --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
-            --image ${{ env.ACR_NAME }}.azurecr.io/oss-agent-mcp:${{ github.sha }}
+            --image ${{ steps.acr.outputs.loginServer }}/oss-agent-mcp:${{ github.sha }}
 
       - name: Print agent URL
         run: |
