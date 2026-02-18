@@ -55,6 +55,9 @@ module mcpServer 'modules/container-app.bicep' = {
     location: location
     tags: tags
     environmentId: containerAppEnvironment.outputs.id
+    registryServer: containerRegistry.outputs.loginServer
+    targetPort: 8001
+    command: ['python', '/app/mcp-servers/sample_server.py']
     envVars: []
     isExternal: false
   }
@@ -68,6 +71,8 @@ module agent 'modules/container-app.bicep' = {
     location: location
     tags: tags
     environmentId: containerAppEnvironment.outputs.id
+    registryServer: containerRegistry.outputs.loginServer
+    targetPort: 8080
     envVars: [
       {
         name: 'LLM_PROVIDER'
@@ -117,3 +122,22 @@ output agentUrl string = 'https://${agent.outputs.fqdn}'
 output mcpServerFqdn string = mcpServer.outputs.fqdn
 output acrLoginServer string = containerRegistry.outputs.loginServer
 output resourceGroupName string = rg.name
+
+// AcrPull role assignments for container apps
+module agentAcrPull 'modules/acr-pull-role.bicep' = {
+  name: 'agent-acr-pull'
+  scope: rg
+  params: {
+    acrName: replace('cr${environmentName}', '-', '')
+    principalId: agent.outputs.principalId
+  }
+}
+
+module mcpAcrPull 'modules/acr-pull-role.bicep' = {
+  name: 'mcp-acr-pull'
+  scope: rg
+  params: {
+    acrName: replace('cr${environmentName}', '-', '')
+    principalId: mcpServer.outputs.principalId
+  }
+}

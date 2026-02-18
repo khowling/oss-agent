@@ -64,16 +64,6 @@ jobs:
           template: infra/main.bicep
           parameters: infra/main.bicepparam
 
-      - name: Grant AcrPull to container apps
-        run: |
-          ACR_ID=$(az acr show --name ${{ env.ACR_NAME }} --query id -o tsv)
-          for APP_NAME in ca-agent-${{ env.ENVIRONMENT_NAME }} ca-mcp-${{ env.ENVIRONMENT_NAME }}; do
-            PRINCIPAL_ID=$(az containerapp show --name $APP_NAME --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --query identity.principalId -o tsv 2>/dev/null || true)
-            if [ -n "$PRINCIPAL_ID" ]; then
-              az role assignment create --assignee "$PRINCIPAL_ID" --role AcrPull --scope "$ACR_ID" 2>/dev/null || true
-            fi
-          done
-
   deploy-app:
     needs: [detect-changes, deploy-infra]
     if: always() && !failure() && !cancelled()
@@ -91,16 +81,6 @@ jobs:
 
       - name: Login to ACR
         run: az acr login --name ${{ env.ACR_NAME }}
-
-      - name: Ensure AcrPull role for container apps
-        run: |
-          ACR_ID=$(az acr show --name ${{ env.ACR_NAME }} --query id -o tsv)
-          for APP_NAME in ca-agent-${{ env.ENVIRONMENT_NAME }} ca-mcp-${{ env.ENVIRONMENT_NAME }}; do
-            PRINCIPAL_ID=$(az containerapp show --name $APP_NAME --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --query identity.principalId -o tsv 2>/dev/null || true)
-            if [ -n "$PRINCIPAL_ID" ]; then
-              az role assignment create --assignee "$PRINCIPAL_ID" --role AcrPull --scope "$ACR_ID" 2>/dev/null || true
-            fi
-          done
 
       - name: Set image tag
         id: tag
@@ -131,25 +111,6 @@ jobs:
 
       - name: Deploy agent to ACA
         run: |
-          az containerapp registry set \
-            --name ca-agent-${{ env.ENVIRONMENT_NAME }} \
-            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
-            --server ${{ env.ACR_NAME }}.azurecr.io \
-            --identity system
-          # Wait for registry set to complete provisioning
-          while [ "$(az containerapp show --name ca-agent-${{ env.ENVIRONMENT_NAME }} --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --query properties.provisioningState -o tsv)" = "InProgress" ]; do
-            echo "Waiting for provisioning to complete..."
-            sleep 10
-          done
-          az containerapp ingress update \
-            --name ca-agent-${{ env.ENVIRONMENT_NAME }} \
-            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
-            --target-port 8080
-          # Wait again
-          while [ "$(az containerapp show --name ca-agent-${{ env.ENVIRONMENT_NAME }} --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --query properties.provisioningState -o tsv)" = "InProgress" ]; do
-            echo "Waiting for provisioning to complete..."
-            sleep 10
-          done
           az containerapp update \
             --name ca-agent-${{ env.ENVIRONMENT_NAME }} \
             --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
@@ -157,28 +118,10 @@ jobs:
 
       - name: Deploy MCP server to ACA
         run: |
-          az containerapp registry set \
-            --name ca-mcp-${{ env.ENVIRONMENT_NAME }} \
-            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
-            --server ${{ env.ACR_NAME }}.azurecr.io \
-            --identity system
-          while [ "$(az containerapp show --name ca-mcp-${{ env.ENVIRONMENT_NAME }} --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --query properties.provisioningState -o tsv)" = "InProgress" ]; do
-            echo "Waiting for provisioning to complete..."
-            sleep 10
-          done
-          az containerapp ingress update \
-            --name ca-mcp-${{ env.ENVIRONMENT_NAME }} \
-            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
-            --target-port 8001
-          while [ "$(az containerapp show --name ca-mcp-${{ env.ENVIRONMENT_NAME }} --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --query properties.provisioningState -o tsv)" = "InProgress" ]; do
-            echo "Waiting for provisioning to complete..."
-            sleep 10
-          done
           az containerapp update \
             --name ca-mcp-${{ env.ENVIRONMENT_NAME }} \
             --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
-            --image ${{ env.ACR_NAME }}.azurecr.io/oss-agent-mcp:${{ steps.tag.outputs.sha }} \
-            --command "python" "/app/mcp-servers/sample_server.py"
+            --image ${{ env.ACR_NAME }}.azurecr.io/oss-agent-mcp:${{ steps.tag.outputs.sha }}
 
       - name: Print deployment info
         run: |
