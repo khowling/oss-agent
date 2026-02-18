@@ -4,19 +4,47 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      deploy_infra:
+        description: 'Force infrastructure deployment'
+        type: boolean
+        default: false
 
 env:
   ENVIRONMENT_NAME: oss-agent-dev
   AZURE_RESOURCE_GROUP: rg-oss-agent-dev
+  ACR_NAME: crossagentdev
 
 permissions:
   id-token: write
   contents: read
 
 jobs:
-  build-and-deploy:
+  detect-changes:
     runs-on: ubuntu-latest
+    outputs:
+      infra_changed: ${{ steps.changes.outputs.infra }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
 
+      - name: Detect infra changes
+        id: changes
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.deploy_infra }}" = "true" ]; then
+            echo "infra=true" >> "$GITHUB_OUTPUT"
+          elif git diff --name-only HEAD~1 HEAD | grep -q '^infra/'; then
+            echo "infra=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "infra=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  deploy-infra:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.infra_changed == 'true'
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -30,27 +58,15 @@ jobs:
 
       - name: Deploy infrastructure
         uses: azure/arm-deploy@v2
-        id: infra
         with:
           scope: subscription
           region: uksouth
           template: infra/main.bicep
           parameters: infra/main.bicepparam
 
-      - name: Get ACR name
-        id: acr
-        run: |
-          ACR_LOGIN_SERVER="${{ steps.infra.outputs.acrLoginServer }}"
-          ACR_NAME="${ACR_LOGIN_SERVER%%.*}"
-          echo "name=$ACR_NAME" >> "$GITHUB_OUTPUT"
-          echo "loginServer=$ACR_LOGIN_SERVER" >> "$GITHUB_OUTPUT"
-
-      - name: Login to ACR
-        run: az acr login --name ${{ steps.acr.outputs.name }}
-
       - name: Grant AcrPull to container apps
         run: |
-          ACR_ID=$(az acr show --name ${{ steps.acr.outputs.name }} --query id -o tsv)
+          ACR_ID=$(az acr show --name ${{ env.ACR_NAME }} --query id -o tsv)
           for APP_NAME in ca-agent-${{ env.ENVIRONMENT_NAME }} ca-mcp-${{ env.ENVIRONMENT_NAME }}; do
             PRINCIPAL_ID=$(az containerapp show --name $APP_NAME --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --query identity.principalId -o tsv 2>/dev/null || true)
             if [ -n "$PRINCIPAL_ID" ]; then
@@ -58,26 +74,57 @@ jobs:
             fi
           done
 
+  deploy-app:
+    needs: [detect-changes, deploy-infra]
+    if: always() && !failure() && !cancelled()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Login to Azure
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Login to ACR
+        run: az acr login --name ${{ env.ACR_NAME }}
+
+      - name: Set image tag
+        id: tag
+        run: |
+          SHORT_SHA="${GITHUB_SHA::8}"
+          echo "sha=$SHORT_SHA" >> "$GITHUB_OUTPUT"
+          echo "Image tag: $SHORT_SHA"
+
       - name: Build and push agent image
         run: |
-          docker build -t ${{ steps.acr.outputs.loginServer }}/oss-agent:${{ github.sha }} \
-                       -t ${{ steps.acr.outputs.loginServer }}/oss-agent:latest .
-          docker push ${{ steps.acr.outputs.loginServer }}/oss-agent:${{ github.sha }}
-          docker push ${{ steps.acr.outputs.loginServer }}/oss-agent:latest
+          docker build \
+            --label "org.opencontainers.image.source=https://github.com/${{ github.repository }}" \
+            --label "org.opencontainers.image.revision=${{ github.sha }}" \
+            --label "org.opencontainers.image.created=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            -t ${{ env.ACR_NAME }}.azurecr.io/oss-agent:${{ steps.tag.outputs.sha }} \
+            -t ${{ env.ACR_NAME }}.azurecr.io/oss-agent:latest .
+          docker push ${{ env.ACR_NAME }}.azurecr.io/oss-agent --all-tags
 
       - name: Build and push MCP server image
         run: |
-          docker build -t ${{ steps.acr.outputs.loginServer }}/oss-agent-mcp:${{ github.sha }} \
-                       -t ${{ steps.acr.outputs.loginServer }}/oss-agent-mcp:latest .
-          docker push ${{ steps.acr.outputs.loginServer }}/oss-agent-mcp:${{ github.sha }}
-          docker push ${{ steps.acr.outputs.loginServer }}/oss-agent-mcp:latest
+          docker build \
+            --label "org.opencontainers.image.source=https://github.com/${{ github.repository }}" \
+            --label "org.opencontainers.image.revision=${{ github.sha }}" \
+            --label "org.opencontainers.image.created=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            -t ${{ env.ACR_NAME }}.azurecr.io/oss-agent-mcp:${{ steps.tag.outputs.sha }} \
+            -t ${{ env.ACR_NAME }}.azurecr.io/oss-agent-mcp:latest .
+          docker push ${{ env.ACR_NAME }}.azurecr.io/oss-agent-mcp --all-tags
 
       - name: Deploy agent to ACA
         run: |
           az containerapp registry set \
             --name ca-agent-${{ env.ENVIRONMENT_NAME }} \
             --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
-            --server ${{ steps.acr.outputs.loginServer }} \
+            --server ${{ env.ACR_NAME }}.azurecr.io \
             --identity system
           az containerapp ingress update \
             --name ca-agent-${{ env.ENVIRONMENT_NAME }} \
@@ -86,14 +133,14 @@ jobs:
           az containerapp update \
             --name ca-agent-${{ env.ENVIRONMENT_NAME }} \
             --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
-            --image ${{ steps.acr.outputs.loginServer }}/oss-agent:${{ github.sha }}
+            --image ${{ env.ACR_NAME }}.azurecr.io/oss-agent:${{ steps.tag.outputs.sha }}
 
       - name: Deploy MCP server to ACA
         run: |
           az containerapp registry set \
             --name ca-mcp-${{ env.ENVIRONMENT_NAME }} \
             --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
-            --server ${{ steps.acr.outputs.loginServer }} \
+            --server ${{ env.ACR_NAME }}.azurecr.io \
             --identity system
           az containerapp ingress update \
             --name ca-mcp-${{ env.ENVIRONMENT_NAME }} \
@@ -102,9 +149,11 @@ jobs:
           az containerapp update \
             --name ca-mcp-${{ env.ENVIRONMENT_NAME }} \
             --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
-            --image ${{ steps.acr.outputs.loginServer }}/oss-agent-mcp:${{ github.sha }} \
+            --image ${{ env.ACR_NAME }}.azurecr.io/oss-agent-mcp:${{ steps.tag.outputs.sha }} \
             --command "python" "/app/mcp-servers/sample_server.py"
 
-      - name: Print agent URL
+      - name: Print deployment info
         run: |
-          echo "Agent URL: ${{ steps.infra.outputs.agentUrl }}"
+          FQDN=$(az containerapp show --name ca-agent-${{ env.ENVIRONMENT_NAME }} --resource-group ${{ env.AZURE_RESOURCE_GROUP }} --query properties.configuration.ingress.fqdn -o tsv)
+          echo "Agent URL: https://$FQDN"
+          echo "Image tag: ${{ steps.tag.outputs.sha }}"
