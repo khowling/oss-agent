@@ -10,9 +10,6 @@ param tags object = {}
 @description('Container App Environment resource ID')
 param environmentId string
 
-@description('Target port for the container')
-param targetPort int
-
 @description('Environment variables')
 param envVars array = []
 
@@ -31,7 +28,7 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
     configuration: {
       ingress: {
         external: isExternal
-        targetPort: targetPort
+        targetPort: 80
         transport: 'auto'
       }
       secrets: secrets

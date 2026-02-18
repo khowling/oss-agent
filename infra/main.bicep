@@ -55,7 +55,6 @@ module mcpServer 'modules/container-app.bicep' = {
     location: location
     tags: tags
     environmentId: containerAppEnvironment.outputs.id
-    targetPort: 8001
     envVars: []
     isExternal: false
   }
@@ -69,7 +68,6 @@ module agent 'modules/container-app.bicep' = {
     location: location
     tags: tags
     environmentId: containerAppEnvironment.outputs.id
-    targetPort: 8080
     envVars: [
       {
         name: 'LLM_PROVIDER'
